@@ -16,6 +16,12 @@
 -A INPUT -p tcp -s {{ cidr }} --dport {{ ssh_port }} -m conntrack --ctstate NEW -j ACCEPT
 {% endfor %}
 {% endif %}
+{% for port in firewall_allowed_tcp_ports_v6 %}
+-A INPUT -p tcp --dport {{ port }} -m conntrack --ctstate NEW -j ACCEPT
+{% endfor %}
+{% for port in firewall_allowed_udp_ports_v6 %}
+-A INPUT -p udp --dport {{ port }} -m conntrack --ctstate NEW -j ACCEPT
+{% endfor %}
 -A INPUT -j DROP
 
 COMMIT

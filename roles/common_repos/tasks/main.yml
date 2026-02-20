@@ -9,7 +9,20 @@
   when: ansible_distribution == 'Debian'
 
 - name: Update apt cache
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
+  block:
+    - name: Update apt cache via apt module
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 300
+  rescue:
+    - name: Allow release info change and refresh apt cache
+      ansible.builtin.command: apt-get update --allow-releaseinfo-change
+      changed_when: false
+
+    - name: Retry apt cache update via apt module
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 300
   when: ansible_distribution == 'Debian'

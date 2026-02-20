@@ -16,6 +16,34 @@
 -A INPUT -p tcp -s {{ cidr }} --dport {{ ssh_port }} -m conntrack --ctstate NEW -j ACCEPT
 {% endfor %}
 {% endif %}
+{% for port in firewall_allowed_tcp_ports %}
+-A INPUT -p tcp --dport {{ port }} -m conntrack --ctstate NEW -j ACCEPT
+{% endfor %}
+{% for port in firewall_allowed_udp_ports %}
+-A INPUT -p udp --dport {{ port }} -m conntrack --ctstate NEW -j ACCEPT
+{% endfor %}
 -A INPUT -j DROP
 
+{% if firewall_forward_ipv4_enabled | bool %}
+-A FORWARD -m conntrack --ctstate INVALID -j DROP
+-A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+{% if firewall_forward_ipv4_lan_cidr | length > 0 %}
+-A FORWARD -i {{ firewall_forward_ipv4_lan_interface }} -o {{ firewall_forward_ipv4_wan_interface }} -s {{ firewall_forward_ipv4_lan_cidr }} -j ACCEPT
+{% else %}
+-A FORWARD -i {{ firewall_forward_ipv4_lan_interface }} -o {{ firewall_forward_ipv4_wan_interface }} -j ACCEPT
+{% endif %}
+{% endif %}
+
 COMMIT
+
+{% if firewall_nat_ipv4_enabled | bool %}
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+
+-A POSTROUTING -o {{ firewall_forward_ipv4_wan_interface }} -j MASQUERADE
+
+COMMIT
+{% endif %}

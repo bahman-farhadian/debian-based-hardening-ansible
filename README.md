@@ -36,7 +36,7 @@ Current stage 2 hardening includes:
 - `prep_baseline` replaces bootstrap scripting: installs baseline admin packages, sets shell defaults, configures aliases/prompts, and can bootstrap root authorized keys.
 - `network_identity` manages hostname, `/etc/hosts`, and optional `/etc/resolv.conf`.
 - `package_hardening` enables unattended upgrades, update/upgrade flows, `debsums`, and residual package cleanup.
-- `firewall` manages iptables/ip6tables policy, backend selection (`nft`/`legacy` handling), runtime restore, and persistent rules.
+- `firewall` manages iptables/ip6tables policy, backend selection (`nft`/`legacy` handling), runtime restore, persistent rules, optional service-port allow list, and optional IPv4 forwarding/NAT mode.
 - `kernel_hardening` applies sysctl/kernel hardening controls with optional module loading lock.
 - `auth_hardening` applies password/account policy baseline.
 - `banner_hardening` applies local and SSH legal banners.
@@ -75,6 +75,48 @@ Set host alias under `hardening_targets`.
 Set `ansible_host` to target hostname.
 Set `ansible_user` to the SSH user.
 
+Single inventory template:
+
+```yaml
+all:
+  children:
+    hardening_targets:
+      hosts:
+        target-node-01:
+          ansible_host: change-me-host-or-ip
+          ansible_user: change-me-ssh-user
+          ansible_port: 22
+        # target-node-02:
+        #   ansible_host: change-me-host-or-ip-2
+        #   ansible_user: change-me-ssh-user
+        #   ansible_port: 22
+```
+
+For multiple VMs, add more host blocks under `hardening_targets.hosts`.
+Ansible runs them simultaneously (up to fork count).
+
+All baseline hardening variables are centralized in `group_vars/all.yml`.
+The defaults in `group_vars/all.yml` are tuned to avoid the common drop from 88 to 87
+related to DNS identity (`NETW-2705` / `NAME-4028`) and residual packages (`PKGS-7346`).
+
+Run all hosts in inventory:
+
+```bash
+make harden
+```
+
+Run one host only:
+
+```bash
+make harden LIMIT=target-node-01
+```
+
+Increase parallelism for many hosts:
+
+```bash
+make harden FORKS=20
+```
+
 ## Local secrets file (git-ignored)
 
 For sensitive values (for example GRUB password plaintext), use a local override file:
@@ -87,6 +129,23 @@ cp group_vars/local_secrets.yml.example group_vars/local_secrets.yml
 Keep real secret values only in that local file, not in `group_vars/all.yml`.
 
 ## Quick runbook
+
+Recommended first-run sequence (fresh VM):
+
+```bash
+make help
+make ping
+make scan
+make harden LIMIT=target-node-01
+make reboot LIMIT=target-node-01
+make scan LIMIT=target-node-01
+make score
+make gap-report
+make runtime-check
+```
+
+If you change `ssh_port` in `group_vars/all.yml`, run hardening in 2 passes:
+pass 1 with current inventory `ansible_port`, then update `ansible_port` in inventory, then pass 2.
 
 Connectivity test:
 
@@ -129,11 +188,56 @@ Run staged workflow via `site.yml`:
 ansible-playbook playbooks/site.yml -e run_lynis_scan=true -e run_os_hardening=true
 ```
 
-## Makefile commands
+## Firewall service ports and forwarding
 
-Use these shortcuts:
+This project uses default-drop firewall policy. Any service port not explicitly allowed will be blocked.
+
+Allow common service ports (example: NGINX and MariaDB) in `group_vars/all.yml`:
+
+```yaml
+firewall_allowed_tcp_ports:
+  - 80
+  - 443
+  - 3306
+```
+
+Allow IPv6 service ports (if needed):
+
+```yaml
+firewall_allowed_tcp_ports_v6:
+  - 80
+  - 443
+```
+
+Enable bastion/router mode with IPv4 forwarding (and optional NAT):
+
+```yaml
+firewall_forward_ipv4_enabled: true
+firewall_forward_ipv4_lan_interface: "<lan-interface>"
+firewall_forward_ipv4_wan_interface: "<wan-interface>"
+firewall_forward_ipv4_lan_cidr: "<lan-cidr>"
+firewall_nat_ipv4_enabled: true
+```
+
+Apply and validate:
 
 ```bash
+make harden
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "sysctl net.ipv4.ip_forward; iptables -S FORWARD; iptables -t nat -S POSTROUTING"
+```
+
+Critical production note:
+
+- Do not run first-time hardening directly on production servers carrying live traffic.
+- This role can immediately close ports that are not explicitly allowed and cause downtime.
+- Always pre-declare required ports/forwarding, test on staging, and apply in a maintenance window.
+
+## Makefile commands
+
+Basic targets:
+
+```bash
+make help
 make venv
 make ping
 make scan
@@ -148,6 +252,47 @@ make runtime-check
 
 `make reboot` runs `ansible -i inventories/hosts.yml hardening_targets -b -m reboot` and performs a controlled reboot of all hosts in `hardening_targets`.
 
+Supported switches:
+
+- `INVENTORY=<path>` use a different inventory file
+- `GROUP=<group>` change target group (default `hardening_targets`)
+- `LIMIT=<host_or_group>` run only selected hosts
+- `FORKS=<n>` parallelism for multi-host runs
+- `EXTRA_VARS='<k=v ...>'` pass playbook variables
+- `TAGS=<tag1,tag2>` run only matching tags
+- `SKIP_TAGS=<tag1,tag2>` skip matching tags
+- `CHECK=true` run in check mode
+- `DIFF=true` show template/file diffs
+- `EXTRA_ARGS='<raw args>'` append raw Ansible CLI args
+
+End-user examples:
+
+```bash
+# Harden all hosts in the inventory
+make harden
+
+# Harden one VM only
+make harden LIMIT=target-node-01
+
+# Harden many VMs with higher parallelism
+make harden FORKS=20
+
+# Run dry-run with diffs
+make harden CHECK=true DIFF=true
+
+# Override variables for one run
+make harden EXTRA_VARS='ssh_port=2222 firewall_allowed_tcp_ports=[80,443]'
+
+# Run only firewall-related tagged tasks
+make harden TAGS=firewall
+
+# Skip session logging tasks
+make harden SKIP_TAGS=session_logging
+
+# Run scan on one host
+make scan LIMIT=target-node-01
+```
+
 ## Idempotency check
 
 Run stage 2 twice on the same host.
@@ -155,8 +300,8 @@ For a strict idempotency check, disable dist-upgrade during validation.
 Use host aliases from `inventories/hosts.yml` directly.
 
 ```bash
-ansible-playbook playbooks/10_os_hardening.yml -l hardening-node-01 -e package_hardening_run_dist_upgrade=false
-ansible-playbook playbooks/10_os_hardening.yml -l hardening-node-01 -e package_hardening_run_dist_upgrade=false
+ansible-playbook playbooks/10_os_hardening.yml -l target-node-01 -e package_hardening_run_dist_upgrade=false
+ansible-playbook playbooks/10_os_hardening.yml -l target-node-01 -e package_hardening_run_dist_upgrade=false
 ```
 
 Expected result on second run:
@@ -372,6 +517,11 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `firewall_enable_extra_input_hardening`
 - `firewall_allow_ssh_from_anywhere`
 - `firewall_allowed_ssh_cidrs`
+- `firewall_allowed_tcp_ports` and `firewall_allowed_udp_ports`
+- `firewall_allowed_tcp_ports_v6` and `firewall_allowed_udp_ports_v6`
+- `firewall_forward_ipv4_enabled`
+- `firewall_forward_ipv4_lan_interface`, `firewall_forward_ipv4_wan_interface`, `firewall_forward_ipv4_lan_cidr`
+- `firewall_nat_ipv4_enabled`
 - `package_hardening_run_dist_upgrade`
 - `package_hardening_purge_removed_packages`
 - `auth_apply_to_existing_local_users`

@@ -27,14 +27,16 @@ prep_primary_user_uid: "1000"
 
 # Network identity hardening
 network_identity_manage_hosts: true
-# Avoid changing DNS settings by default; enable and set nameservers for your environment.
-network_identity_manage_resolv_conf: false
+# Keep DNS identity controls enabled by default to avoid Lynis NETW-2705/NAME-4028 regressions.
+network_identity_manage_resolv_conf: true
 network_identity_primary_ipv4: ""
-network_identity_nameservers: []
+network_identity_nameservers:
+  - "8.8.8.8"
+  - "1.1.1.1"
 network_identity_search_domains: []
 network_identity_set_hostname: true
 network_identity_hostname: "{{ (network_identity_fqdn if (network_identity_fqdn | length > 0) else inventory_hostname).split('.')[0] }}"
-network_identity_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else '' }}"
+network_identity_fqdn: "{{ inventory_hostname if '.' in inventory_hostname else inventory_hostname ~ '.localdomain' }}"
 network_identity_manage_loopback_fqdn: true
 network_identity_manage_hosts_via_template: true
 network_identity_cleanup_stale_hostname_entries: true
@@ -113,6 +115,17 @@ firewall_enable_extra_input_hardening: true
 firewall_allow_ssh_from_anywhere: true
 # Populate with CIDRs only when firewall_allow_ssh_from_anywhere is false.
 firewall_allowed_ssh_cidrs: []
+# Optional service ports (ingress allow list)
+firewall_allowed_tcp_ports: []
+firewall_allowed_udp_ports: []
+firewall_allowed_tcp_ports_v6: []
+firewall_allowed_udp_ports_v6: []
+# Optional bastion/router mode (IPv4 forwarding + optional NAT masquerade)
+firewall_forward_ipv4_enabled: false
+firewall_forward_ipv4_lan_interface: ""
+firewall_forward_ipv4_wan_interface: ""
+firewall_forward_ipv4_lan_cidr: ""
+firewall_nat_ipv4_enabled: false
 
 # Fail2ban
 fail2ban_bantime: "1h"

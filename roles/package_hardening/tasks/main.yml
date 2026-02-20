@@ -43,11 +43,56 @@
     - package_hardening_purge_candidates | default([]) | length > 0
 
 - name: Update package index and apply dist-upgrade
-  ansible.builtin.apt:
-    update_cache: true
-    upgrade: dist
-    autoremove: true
+  block:
+    - name: Apply dist-upgrade via apt module
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        autoremove: true
+        lock_timeout: 600
+  rescue:
+    - name: Allow release info change and refresh apt cache
+      ansible.builtin.command: apt-get update --allow-releaseinfo-change
+      changed_when: false
+
+    - name: Retry dist-upgrade via apt module
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        autoremove: true
+        lock_timeout: 600
   when: package_hardening_run_dist_upgrade | bool
+
+- name: Re-collect residual config packages after dist-upgrade
+  ansible.builtin.command: "dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\\n'"
+  register: package_hardening_dpkg_status_after_upgrade
+  changed_when: false
+  when:
+    - package_hardening_purge_removed_packages | bool
+    - package_hardening_run_dist_upgrade | bool
+
+- name: Build post-upgrade purge list for residual config packages
+  ansible.builtin.set_fact:
+    package_hardening_purge_candidates_after_upgrade: >-
+      {{
+        package_hardening_dpkg_status_after_upgrade.stdout_lines
+        | default([])
+        | select('match', '^rc\s+')
+        | map('regex_replace', '^rc\s+([^\s]+).*$', '\1')
+        | list
+      }}
+  when:
+    - package_hardening_purge_removed_packages | bool
+    - package_hardening_run_dist_upgrade | bool
+
+- name: Purge post-upgrade residual config-only packages
+  ansible.builtin.command: "dpkg --purge {{ item }}"
+  loop: "{{ package_hardening_purge_candidates_after_upgrade | default([]) }}"
+  changed_when: true
+  when:
+    - package_hardening_purge_removed_packages | bool
+    - package_hardening_run_dist_upgrade | bool
+    - package_hardening_purge_candidates_after_upgrade | default([]) | length > 0
 
 - name: Configure automatic security updates
   ansible.builtin.template:
