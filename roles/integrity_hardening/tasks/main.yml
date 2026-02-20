@@ -1,8 +1,13 @@
 ---
 - name: Install file integrity and malware detection packages
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name: "{{ integrity_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout | default(600) }}"
+  register: integrity_packages_install
+  retries: "{{ apt_package_retries | default(6) }}"
+  delay: "{{ apt_package_retry_delay | default(10) }}"
+  until: integrity_packages_install is succeeded
 
 - name: Configure AIDE checksum algorithm
   ansible.builtin.lineinfile:

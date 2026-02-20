@@ -1,14 +1,20 @@
 ---
 - name: Install required preparation baseline packages
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name: "{{ prep_required_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout | default(600) }}"
+  register: prep_required_packages_install
+  retries: "{{ apt_package_retries | default(6) }}"
+  delay: "{{ apt_package_retry_delay | default(10) }}"
+  until: prep_required_packages_install is succeeded
   when: prep_enabled | bool
 
 - name: Install optional preparation baseline packages when available
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name: "{{ prep_optional_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout | default(600) }}"
   failed_when: false
   when: prep_enabled | bool
 

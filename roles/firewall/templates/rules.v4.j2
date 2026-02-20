@@ -10,10 +10,14 @@
 -A INPUT -p icmp -j ACCEPT
 {% endif %}
 {% if firewall_allow_ssh_from_anywhere | bool %}
--A INPUT -p tcp --dport {{ ssh_port }} -m conntrack --ctstate NEW -j ACCEPT
+{% for port in firewall_effective_ssh_ports | default([ssh_port | int]) %}
+-A INPUT -p tcp --dport {{ port }} -m conntrack --ctstate NEW -j ACCEPT
+{% endfor %}
 {% else %}
 {% for cidr in firewall_allowed_ssh_cidrs if ':' not in cidr %}
--A INPUT -p tcp -s {{ cidr }} --dport {{ ssh_port }} -m conntrack --ctstate NEW -j ACCEPT
+{% for port in firewall_effective_ssh_ports | default([ssh_port | int]) %}
+-A INPUT -p tcp -s {{ cidr }} --dport {{ port }} -m conntrack --ctstate NEW -j ACCEPT
+{% endfor %}
 {% endfor %}
 {% endif %}
 {% for port in firewall_allowed_tcp_ports %}

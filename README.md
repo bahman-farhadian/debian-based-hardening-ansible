@@ -192,6 +192,10 @@ make score
 ```
 
 This sequence avoids lockout and is the expected path to keep the hardened baseline around score `88` in this project.
+By default, firewall rules also keep the current inventory SSH port allowed during migration (`firewall_allow_current_ansible_port: true`).
+
+If hardening fails with a dpkg/apt lock error caused by `unattended-upgrades`, run `make harden` again.
+Package install tasks now wait/retry on apt locks automatically.
 
 Connectivity test:
 
@@ -569,6 +573,7 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `ssh_clean_login_output`
 - `ssh_print_last_log`
 - `firewall_enable_extra_input_hardening`
+- `firewall_allow_current_ansible_port`
 - `firewall_allow_ssh_from_anywhere`
 - `firewall_allowed_ssh_cidrs`
 - `firewall_allowed_tcp_ports` and `firewall_allowed_udp_ports`
@@ -578,6 +583,7 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `firewall_nat_ipv4_enabled`
 - `package_hardening_run_dist_upgrade`
 - `package_hardening_purge_removed_packages`
+- `apt_lock_timeout`, `apt_package_retries`, `apt_package_retry_delay`
 - `auth_apply_to_existing_local_users`
 - `auth_apply_to_root`
 - `kernel_sysctl_dropin_path`

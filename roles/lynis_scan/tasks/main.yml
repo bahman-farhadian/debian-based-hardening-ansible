@@ -1,10 +1,15 @@
 ---
 - name: Ensure required packages for Lynis are present
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name:
       - git
       - ca-certificates
     state: present
+    lock_timeout: "{{ apt_lock_timeout | default(600) }}"
+  register: lynis_packages_install
+  retries: "{{ apt_package_retries | default(6) }}"
+  delay: "{{ apt_package_retry_delay | default(10) }}"
+  until: lynis_packages_install is succeeded
 
 - name: Clone or update Lynis under /opt
   ansible.builtin.git:

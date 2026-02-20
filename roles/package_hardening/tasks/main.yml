@@ -1,13 +1,19 @@
 ---
 - name: Install required package hardening utilities
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name: "{{ package_hardening_required_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout | default(600) }}"
+  register: package_hardening_required_install
+  retries: "{{ apt_package_retries | default(6) }}"
+  delay: "{{ apt_package_retry_delay | default(10) }}"
+  until: package_hardening_required_install is succeeded
 
 - name: Install optional package hardening utilities when available
-  ansible.builtin.package:
+  ansible.builtin.apt:
     name: "{{ package_hardening_optional_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout | default(600) }}"
   failed_when: false
 
 - name: Configure debsums periodic check
@@ -107,7 +113,6 @@
   ansible.builtin.systemd:
     name: "{{ item }}"
     enabled: true
-    state: started
   loop:
     - apt-daily.timer
     - apt-daily-upgrade.timer

@@ -4,6 +4,7 @@ firewall_default_input_policy: "DROP"
 firewall_default_forward_policy: "DROP"
 firewall_default_output_policy: "ACCEPT"
 firewall_allow_ssh_from_anywhere: true
+firewall_allow_current_ansible_port: true
 firewall_allowed_ssh_cidrs: []
 firewall_allowed_tcp_ports: []
 firewall_allowed_udp_ports: []
