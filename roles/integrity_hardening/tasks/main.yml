@@ -1,0 +1,41 @@
+---
+- name: Install file integrity and malware detection packages
+  ansible.builtin.package:
+    name: "{{ integrity_packages }}"
+    state: present
+
+- name: Configure AIDE checksum algorithm
+  ansible.builtin.lineinfile:
+    path: /etc/aide/aide.conf
+    regexp: '^Checksums\s*='
+    line: "Checksums = {{ integrity_aide_checksum_algorithm }}"
+
+- name: Check if AIDE database already exists
+  ansible.builtin.stat:
+    path: /var/lib/aide/aide.db
+  register: integrity_aide_db
+
+- name: Initialize AIDE database
+  ansible.builtin.command: aideinit
+  changed_when: true
+  when:
+    - integrity_initialize_aide | bool
+    - not integrity_aide_db.stat.exists
+
+- name: Check for newly generated AIDE database file
+  ansible.builtin.stat:
+    path: /var/lib/aide/aide.db.new
+  register: integrity_aide_db_new
+  when: integrity_initialize_aide | bool
+
+- name: Activate generated AIDE database
+  ansible.builtin.copy:
+    src: /var/lib/aide/aide.db.new
+    dest: /var/lib/aide/aide.db
+    owner: root
+    group: root
+    mode: "0600"
+    remote_src: true
+  when:
+    - integrity_initialize_aide | bool
+    - integrity_aide_db_new.stat.exists | default(false)

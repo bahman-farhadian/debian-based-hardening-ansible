@@ -1,2 +1,331 @@
-# debian-based-hardening-ansible-
-Ansible playbook to harden Debian-based servers.
+# Debian-based Hardening Ansible
+
+Ansible project for Debian-family server hardening with two stages:
+- Stage 1: run Lynis and collect a baseline report.
+- Stage 2: apply modular hardening roles through one orchestrator role.
+
+This repository is organized for maintainability and later Galaxy publishing.
+
+## Supported targets
+
+- Debian 12
+- Debian 13
+- Ubuntu 22.04 LTS
+- Ubuntu 24.04 LTS
+
+## Project layout
+
+- `playbooks/01_lynis_scan.yml` stage 1 Lynis scan
+- `playbooks/10_os_hardening.yml` stage 2 hardening entrypoint
+- `playbooks/site.yml` runs both stages
+- `group_vars/all.yml` central project variables
+- `inventories/hosts.yml` inventory
+- `roles/os_hardening` stage 2 orchestrator role
+- `roles/prep_baseline` idempotent replacement for bootstrap shell prep
+- `roles/network_identity` DNS, resolv.conf and hosts identity controls
+- `roles/file_permissions_hardening` restrictive permissions for SSH and cron paths
+- `roles/*_hardening` modular hardening roles
+- `artifacts/lynis/<host>/` collected Lynis outputs
+- `Makefile` common run commands
+
+## Control node setup
+
+Install dependencies:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git openssh-client
+```
+
+Create virtual environment and install Ansible:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip wheel
+pip install "ansible-core==2.17.*" ansible-lint
+ansible-playbook --version
+```
+
+## Inventory
+
+Edit `inventories/hosts.yml`.
+Set host alias under `hardening_targets`.
+Set `ansible_host` to target hostname.
+Set `ansible_user` to the SSH user.
+
+## Quick runbook
+
+Connectivity test:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -m ping
+```
+
+Stage 1 baseline scan:
+
+```bash
+ansible-playbook playbooks/01_lynis_scan.yml
+grep '^hardening_index=' artifacts/lynis/*/lynis-report.dat
+grep '^suggestion\[\]=' artifacts/lynis/*/lynis-report.dat
+```
+
+Stage 2 hardening:
+
+```bash
+ansible-playbook playbooks/10_os_hardening.yml
+ansible -i inventories/hosts.yml hardening_targets -b -m reboot
+```
+
+Stage 2 hardening with root SSH key bootstrap:
+
+```bash
+ansible-playbook playbooks/10_os_hardening.yml -e 'prep_root_authorized_keys=["ssh-ed25519 AAAA... your-key-comment"]'
+```
+
+Re-scan after hardening:
+
+```bash
+ansible-playbook playbooks/01_lynis_scan.yml
+grep '^hardening_index=' artifacts/lynis/*/lynis-report.dat
+grep '^suggestion\[\]=' artifacts/lynis/*/lynis-report.dat
+```
+
+Run staged workflow via `site.yml`:
+
+```bash
+ansible-playbook playbooks/site.yml -e run_lynis_scan=true -e run_os_hardening=true
+```
+
+## Makefile commands
+
+Use these shortcuts:
+
+```bash
+make venv
+make ping
+make scan
+make harden
+make reboot
+make score
+make suggestions
+make ssh-check
+make gap-report
+make runtime-check
+```
+
+`make reboot` runs `ansible -i inventories/hosts.yml hardening_targets -b -m reboot` and performs a controlled reboot of all hosts in `hardening_targets`.
+
+## Idempotency check
+
+Run stage 2 twice on the same host.
+For a strict idempotency check, disable dist-upgrade during validation.
+Use host aliases from `inventories/hosts.yml` directly.
+
+```bash
+ansible-playbook playbooks/10_os_hardening.yml -l hardening-node-01 -e package_hardening_run_dist_upgrade=false
+ansible-playbook playbooks/10_os_hardening.yml -l hardening-node-01 -e package_hardening_run_dist_upgrade=false
+```
+
+Expected result on second run:
+- no config drift
+- recap close to `changed=0`
+
+## SSH policy and banner behavior
+
+Current SSH baseline:
+
+- Root login allowed by key only (`PermitRootLogin prohibit-password`)
+- Password authentication disabled
+- MOTD/copyright text disabled for cleaner SSH login output
+- Login banner enabled via `Banner /etc/issue.net`
+- PAM MOTD lines removed from SSH PAM stack for cleaner login output
+
+Banner text variables:
+
+- `banner_issue_text` for `/etc/issue`
+- `banner_issue_net_text` for `/etc/issue.net`
+
+Re-apply hardening to update banner/SSH behavior:
+
+```bash
+ansible-playbook playbooks/10_os_hardening.yml
+```
+
+Verify effective SSH settings:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "sshd -T | egrep 'permitrootlogin|passwordauthentication|banner|printmotd|printlastlog|loglevel|maxauthtries|maxsessions'"
+```
+
+Verify SSH MOTD cleanup:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "grep -n pam_motd /etc/pam.d/sshd || true; wc -c /etc/motd"
+```
+
+## Security logs to review regularly
+
+Recommended log files on each target:
+
+- `/var/log/auth.log` SSH authentication, sudo usage, and login failures.
+- `/var/log/ssh_sessions.log` dedicated SSH session activity log (from this project).
+- `/var/log/fail2ban.log` ban/unban activity and brute-force mitigation.
+- `/var/log/audit/audit.log` kernel audit trail (auditd events and watched files).
+- `/var/log/syslog` service-level system events.
+- `/var/log/lynis.log` and `/var/log/lynis-report.dat` latest Lynis scan details.
+
+Useful review commands:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "tail -n 100 /var/log/auth.log /var/log/ssh_sessions.log /var/log/fail2ban.log /var/log/audit/audit.log /var/log/syslog 2>/dev/null"
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "grep -Ei 'failed|invalid|error|denied|ban' /var/log/auth.log /var/log/fail2ban.log /var/log/audit/audit.log 2>/dev/null | tail -n 100"
+```
+
+## Why score may stop around 80s
+
+Lynis score does not increase only by adding many tasks. It depends on weighted tests, and several remaining items are manual or environment-specific.
+
+Common blockers from your latest report:
+
+- `KRNL-5830` reboot required warning (run reboot after kernel/sysctl/package changes)
+- `FIRE-4512/FIRE-4513` appears when firewall rules are not active in runtime
+- `BOOT-5122` GRUB password setup (manual decision with secure boot flow)
+- `FILE-6310` separate partitions for `/home`, `/tmp`, `/var` (storage layout change)
+- `NAME-4028` and `NAME-4404` DNS/hosts values depend on your network design
+- `LOGG-2154` external log server requires your SIEM/log host endpoint
+- `SSH-7408` non-default SSH port is optional policy choice
+- `KRNL-6000` `kernel.modules_disabled=1` is optional high-impact hardening
+
+Hardening tasks now also target previously open items:
+
+- `AUTH-9282`: existing-account expiry policy applied by default
+- `PKGS-7370`: `debsums` periodic check configured (`CRON_CHECK`)
+- `PKGS-7392`: dist-upgrade pass enabled in stage 2
+- `FINT-4402`: AIDE checksum algorithm set to `sha512`, AIDE DB initialized
+- `HRDN-7222`: compiler binaries restricted to root
+- `KRNL-6000`: extended sysctl set applied
+- `PKGS-7346`: residual `rc` packages purged by default
+- `NAME-4028/NAME-4404/NETW-2705`: managed hosts/resolv controls via `network_identity`
+
+To push from high-80s toward 90, these policy changes usually matter most:
+
+- Set host FQDN and search domain values explicitly in `group_vars/all.yml` or host vars.
+- Change SSH to a non-default port and match firewall allow rules.
+- Enable external log forwarding with `remote_syslog_enabled=true` and your log host.
+- Consider `kernel_lock_module_loading=true` only after validating all required modules are already loaded.
+
+## Path to 90 from current 88
+
+Based on your latest unresolved findings, the realistic levers are:
+
+- `LOGG-2154`: forward logs to an external log host.
+- Optional if still present in your report: `SSH-7408` and `KRNL-6000`.
+
+Recommended sequence:
+
+1. SSH port migration in two runs (only if your report still shows `SSH-7408`):
+First run:
+Keep `ansible_port: 22` in `inventories/hosts.yml`.
+Set `ssh_port: 2222` (or your chosen port) in `group_vars/all.yml`.
+Run `make harden`.
+Second run:
+Change `ansible_port` in `inventories/hosts.yml` to the same new SSH port.
+Run `make harden` again.
+
+2. Enable remaining high-impact controls in `group_vars/all.yml`:
+`remote_syslog_enabled: true`
+`remote_syslog_host: <your-log-server-hostname>`
+Optional:
+`kernel_lock_module_loading: true`
+Only enable `kernel_lock_module_loading: true` after confirming firewall backends still initialize correctly on your kernel.
+
+3. Reboot and validate:
+
+```bash
+make harden
+make reboot
+make runtime-check
+make scan
+make score
+make gap-report
+```
+
+Notes:
+
+- `kernel_lock_module_loading: true` is one-way until reboot and can break workloads that need late module loading.
+- `FIRE-4513` is advisory about potentially unused firewall rules and may remain depending on runtime traffic patterns.
+- `BOOT-5122` (GRUB password) and `FILE-6310` (separate partitions) are mostly manual/infrastructure controls.
+
+## kernel_lock_module_loading explained
+
+`kernel_lock_module_loading` controls whether the playbook writes `kernel.modules_disabled=1`.
+When this value is `1`, the kernel refuses loading any new modules until the next reboot.
+
+Why this can improve score:
+
+- Lynis `KRNL-6000` expects module loading to be locked on hardened systems.
+
+Why this is risky:
+
+- Drivers or kernel features that are not already loaded cannot be loaded later.
+- Firewall backends, storage/network drivers, or virtualization features may fail if they depend on late module loads.
+
+What users should do:
+
+1. Keep `kernel_lock_module_loading: false` during normal rollout and validation.
+2. Run hardening and verify workload health:
+`make harden`
+`make reboot`
+`make runtime-check`
+3. If everything is stable, set `kernel_lock_module_loading: true` in `group_vars/all.yml`.
+4. Apply and reboot again:
+`make harden`
+`make reboot`
+5. Re-run scan and confirm impact:
+`make scan`
+`make gap-report`
+
+If issues appear after enabling it, set `kernel_lock_module_loading: false` and reboot to restore normal module loading behavior.
+
+## Important variables in `group_vars/all.yml`
+
+- `run_lynis_scan`
+- `run_os_hardening`
+- `prep_enabled`
+- `prep_root_authorized_keys`
+- `prep_manage_primary_user`
+- `prep_primary_user_uid`
+- `network_identity_manage_hosts`
+- `network_identity_manage_resolv_conf`
+- `network_identity_primary_ipv4`
+- `network_identity_nameservers`
+- `network_identity_fqdn`
+- `network_identity_manage_loopback_fqdn`
+- `network_identity_manage_hosts_via_template`
+- `ssh_allow_root_login`
+- `ssh_allow_password_auth`
+- `ssh_disable_pam_motd`
+- `ssh_clean_login_output`
+- `ssh_print_last_log`
+- `firewall_enable_extra_input_hardening`
+- `firewall_allow_ssh_from_anywhere`
+- `firewall_allowed_ssh_cidrs`
+- `package_hardening_run_dist_upgrade`
+- `package_hardening_purge_removed_packages`
+- `auth_apply_to_existing_local_users`
+- `auth_apply_to_root`
+- `kernel_sysctl_dropin_path`
+- `kernel_lock_module_loading` (high impact, default false)
+- `file_permissions_hardening_enabled`
+- `integrity_initialize_aide`
+- `remote_syslog_enabled` and `remote_syslog_host`
+
+## Galaxy readiness direction
+
+Stage 2 is now orchestrated through `roles/os_hardening`, with modular sub-roles.
+This keeps the role graph clear and makes migration to Galaxy publishing cleaner.
+
+Next practical step before Galaxy publish:
+- add per-role `README.md` and `meta/main.yml` for each role
+- add Molecule tests for Debian 12 and Ubuntu 22.04/24.04

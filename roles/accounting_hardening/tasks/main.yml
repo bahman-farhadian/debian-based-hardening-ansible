@@ -1,0 +1,32 @@
+---
+- name: Install accounting packages
+  ansible.builtin.package:
+    name: "{{ accounting_packages }}"
+    state: present
+
+- name: Enable sysstat data collection
+  ansible.builtin.lineinfile:
+    path: /etc/default/sysstat
+    regexp: '^ENABLED='
+    line: 'ENABLED="true"'
+  when: accounting_enable_sysstat | bool
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Ensure sysstat service is enabled
+  ansible.builtin.service:
+    name: sysstat
+    enabled: true
+    state: started
+  when:
+    - accounting_enable_sysstat | bool
+    - "'sysstat.service' in ansible_facts.services"
+
+- name: Ensure process accounting service is enabled
+  ansible.builtin.service:
+    name: "{{ 'acct' if 'acct.service' in ansible_facts.services else 'psacct' }}"
+    enabled: true
+    state: started
+  when:
+    - "'acct.service' in ansible_facts.services or 'psacct.service' in ansible_facts.services"

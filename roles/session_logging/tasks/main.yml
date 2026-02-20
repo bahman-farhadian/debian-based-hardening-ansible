@@ -1,0 +1,57 @@
+---
+- name: Ensure rsyslog is installed
+  ansible.builtin.package:
+    name: rsyslog
+    state: present
+
+- name: Configure dedicated SSH session log file
+  ansible.builtin.template:
+    src: ssh-session-rsyslog.conf.j2
+    dest: /etc/rsyslog.d/30-ssh-session-logging.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rsyslog
+
+- name: Ensure session log file exists
+  ansible.builtin.file:
+    path: "{{ ssh_session_log_file }}"
+    state: touch
+    access_time: preserve
+    modification_time: preserve
+    owner: root
+    group: adm
+    mode: "0640"
+
+- name: Configure logrotate retention for SSH session log
+  ansible.builtin.template:
+    src: ssh-session-logrotate.j2
+    dest: /etc/logrotate.d/ssh-session-log
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure remote rsyslog forwarding
+  ansible.builtin.template:
+    src: 90-remote-forwarding.conf.j2
+    dest: /etc/rsyslog.d/90-remote-forwarding.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - remote_syslog_enabled | bool
+    - remote_syslog_host | length > 0
+  notify: Restart rsyslog
+
+- name: Remove remote rsyslog forwarding config when disabled
+  ansible.builtin.file:
+    path: /etc/rsyslog.d/90-remote-forwarding.conf
+    state: absent
+  when: not (remote_syslog_enabled | bool and remote_syslog_host | length > 0)
+  notify: Restart rsyslog
+
+- name: Ensure rsyslog service is enabled and running
+  ansible.builtin.service:
+    name: rsyslog
+    enabled: true
+    state: started

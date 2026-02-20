@@ -1,0 +1,10 @@
+---
+ssh_port: 22
+ssh_allow_password_auth: false
+ssh_allow_root_login: true
+ssh_allowed_users: []
+ssh_banner_path: "/etc/issue.net"
+ssh_disable_pam_motd: true
+ssh_print_last_log: true
+ssh_clean_login_output: true
+ssh_disable_motd_news: true

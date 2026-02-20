@@ -1,0 +1,37 @@
+---
+- name: Site workflow - staged scan and hardening
+  hosts: hardening_targets
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yml
+  tags:
+    - site
+  pre_tasks:
+    - name: Ensure host OS is supported
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == 'Debian'
+          - >-
+            (ansible_distribution == 'Debian' and ansible_distribution_major_version in ['12', '13'])
+            or
+            (ansible_distribution == 'Ubuntu' and ansible_distribution_version in ['22.04', '24.04'])
+        fail_msg: >-
+          Unsupported OS/version. Supported targets are Debian 12/13 and Ubuntu 22.04/24.04.
+
+  tasks:
+    - name: Run Lynis stage when enabled
+      ansible.builtin.include_role:
+        name: lynis_scan
+      when: (run_lynis_scan | default(true)) | bool
+      tags:
+        - lynis
+        - stage1
+
+    - name: Run OS hardening stage when enabled
+      ansible.builtin.include_role:
+        name: os_hardening
+      when: (run_os_hardening | default(false)) | bool
+      tags:
+        - hardening
+        - stage2

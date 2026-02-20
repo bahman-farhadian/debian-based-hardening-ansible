@@ -1,0 +1,7 @@
+---
+ssh_session_log_file: "/var/log/ssh_sessions.log"
+ssh_session_logrotate_days: 30
+remote_syslog_enabled: false
+remote_syslog_host: ""
+remote_syslog_port: 514
+remote_syslog_protocol: "tcp"

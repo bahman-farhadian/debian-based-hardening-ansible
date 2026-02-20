@@ -1,0 +1,25 @@
+---
+- name: Stage 2 - Baseline OS hardening
+  hosts: hardening_targets
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yml
+  tags:
+    - hardening
+    - stage2
+  pre_tasks:
+    - name: Ensure host OS is supported
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == 'Debian'
+          - >-
+            (ansible_distribution == 'Debian' and ansible_distribution_major_version in ['12', '13'])
+            or
+            (ansible_distribution == 'Ubuntu' and ansible_distribution_version in ['22.04', '24.04'])
+        fail_msg: >-
+          Unsupported OS/version. Supported targets are Debian 12/13 and Ubuntu 22.04/24.04.
+  tasks:
+    - name: Apply orchestrated OS hardening role
+      ansible.builtin.include_role:
+        name: os_hardening

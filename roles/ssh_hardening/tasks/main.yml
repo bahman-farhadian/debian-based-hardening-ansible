@@ -1,0 +1,89 @@
+---
+- name: Install OpenSSH server
+  ansible.builtin.package:
+    name: openssh-server
+    state: present
+
+- name: Ensure sshd loads drop-in directory
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$'
+    line: 'Include /etc/ssh/sshd_config.d/*.conf'
+    insertbefore: BOF
+    state: present
+  notify: Restart ssh
+
+- name: Deploy hardened SSH include config
+  ansible.builtin.template:
+    src: sshd_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart ssh
+
+- name: Enforce SSH banner path in main config
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*Banner\s+'
+    line: "Banner {{ ssh_banner_path }}"
+    insertbefore: '^Match\b'
+    state: present
+  notify: Restart ssh
+
+- name: Enforce PrintMotd setting in main config
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*PrintMotd\s+'
+    line: 'PrintMotd no'
+    insertbefore: '^Match\b'
+    state: present
+  when: ssh_clean_login_output | bool
+  notify: Restart ssh
+
+- name: Enforce PrintLastLog setting in main config
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^\s*PrintLastLog\s+'
+    line: "PrintLastLog {{ 'yes' if ssh_print_last_log else 'no' }}"
+    insertbefore: '^Match\b'
+    state: present
+  notify: Restart ssh
+
+- name: Remove pam_motd entries for clear SSH login output
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/sshd
+    regexp: '^\s*session\s+.*pam_motd\.so.*$'
+    state: absent
+  when: ssh_disable_pam_motd | bool
+  notify: Restart ssh
+
+- name: Keep /etc/motd empty for clean SSH login output
+  ansible.builtin.copy:
+    dest: /etc/motd
+    content: ""
+    owner: root
+    group: root
+    mode: "0644"
+  when: ssh_clean_login_output | bool
+
+- name: Check if motd-news defaults file exists
+  ansible.builtin.stat:
+    path: /etc/default/motd-news
+  register: ssh_motd_news_file
+  when: ssh_disable_motd_news | bool
+
+- name: Disable Ubuntu motd-news for cleaner login output
+  ansible.builtin.lineinfile:
+    path: /etc/default/motd-news
+    regexp: '^ENABLED='
+    line: 'ENABLED=0'
+  when:
+    - ssh_disable_motd_news | bool
+    - ssh_motd_news_file.stat.exists
+
+- name: Ensure SSH service is enabled and running
+  ansible.builtin.service:
+    name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
+    enabled: true
+    state: started

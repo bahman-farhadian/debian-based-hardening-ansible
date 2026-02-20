@@ -1,0 +1,195 @@
+---
+- name: Install required preparation baseline packages
+  ansible.builtin.package:
+    name: "{{ prep_required_packages }}"
+    state: present
+  when: prep_enabled | bool
+
+- name: Install optional preparation baseline packages when available
+  ansible.builtin.package:
+    name: "{{ prep_optional_packages }}"
+    state: present
+  failed_when: false
+  when: prep_enabled | bool
+
+- name: Apply global bash defaults in /etc/bash.bashrc
+  ansible.builtin.blockinfile:
+    path: /etc/bash.bashrc
+    marker: "# {mark} ANSIBLE PREP BASELINE"
+    block: "{{ prep_global_bashrc_block }}"
+  when: prep_enabled | bool
+
+- name: Ensure root SSH directory exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: prep_enabled | bool
+
+- name: Authorize provided root SSH public keys
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+    line: "{{ item }}"
+    state: present
+  loop: "{{ prep_root_authorized_keys | reject('equalto', '') | list }}"
+  when:
+    - prep_enabled | bool
+    - (prep_root_authorized_keys | length) > 0
+
+- name: Discover primary user by UID
+  ansible.builtin.command: "getent passwd {{ prep_primary_user_uid }}"
+  register: prep_primary_user_entry
+  changed_when: false
+  failed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+
+- name: Set primary user facts
+  ansible.builtin.set_fact:
+    prep_primary_user_name: "{{ prep_primary_user_entry.stdout.split(':')[0] }}"
+    prep_primary_user_home: "{{ prep_primary_user_entry.stdout.split(':')[5] }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_entry.rc == 0
+    - prep_primary_user_entry.stdout | length > 0
+
+- name: Ensure primary user is in sudo group
+  ansible.builtin.user:
+    name: "{{ prep_primary_user_name }}"
+    groups: sudo
+    append: true
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Ensure primary user sudoers file exists
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ prep_primary_user_name }}"
+    content: "{{ prep_primary_user_name }} {{ prep_primary_user_sudo_policy }}\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: '/usr/sbin/visudo -cf %s'
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Create primary user .bash_profile when missing
+  ansible.builtin.template:
+    src: bash_profile.j2
+    dest: "{{ prep_primary_user_home }}/.bash_profile"
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0644"
+    force: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Create primary user .bash_aliases when missing
+  ansible.builtin.template:
+    src: bash_aliases.j2
+    dest: "{{ prep_primary_user_home }}/.bash_aliases"
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0644"
+    force: false
+  vars:
+    prep_alias_lines: "{{ prep_primary_user_aliases }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Ensure primary user .bashrc sources .bash_aliases
+  ansible.builtin.blockinfile:
+    path: "{{ prep_primary_user_home }}/.bashrc"
+    create: true
+    marker: "# {mark} ANSIBLE PREP ALIASES"
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0644"
+    block: |
+      if [ -f ~/.bash_aliases ]; then
+          . ~/.bash_aliases
+      fi
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Ensure primary user has color prompt
+  ansible.builtin.blockinfile:
+    path: "{{ prep_primary_user_home }}/.bashrc"
+    create: true
+    marker: "# {mark} ANSIBLE PREP PROMPT"
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0644"
+    block: |
+      # Colorized PS1 Prompt
+      {{ prep_primary_user_prompt_line }}
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Create root .bash_profile when missing
+  ansible.builtin.template:
+    src: bash_profile.j2
+    dest: /root/.bash_profile
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  when: prep_enabled | bool
+
+- name: Create root .bash_aliases when missing
+  ansible.builtin.template:
+    src: bash_aliases.j2
+    dest: /root/.bash_aliases
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  vars:
+    prep_alias_lines: "{{ prep_root_aliases }}"
+  when: prep_enabled | bool
+
+- name: Ensure root .bashrc sources .bash_aliases
+  ansible.builtin.blockinfile:
+    path: /root/.bashrc
+    create: true
+    marker: "# {mark} ANSIBLE PREP ALIASES"
+    owner: root
+    group: root
+    mode: "0644"
+    block: |
+      if [ -f ~/.bash_aliases ]; then
+          . ~/.bash_aliases
+      fi
+  when: prep_enabled | bool
+
+- name: Ensure root has color prompt
+  ansible.builtin.blockinfile:
+    path: /root/.bashrc
+    create: true
+    marker: "# {mark} ANSIBLE PREP PROMPT"
+    owner: root
+    group: root
+    mode: "0644"
+    block: |
+      # Colorized PS1 Prompt
+      {{ prep_root_prompt_line }}
+  when: prep_enabled | bool

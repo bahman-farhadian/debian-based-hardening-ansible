@@ -1,0 +1,10 @@
+{{ ssh_session_log_file }} {
+    daily
+    rotate {{ ssh_session_logrotate_days }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 root adm
+}

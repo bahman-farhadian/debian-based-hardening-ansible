@@ -1,0 +1,8 @@
+---
+apt_repository_url: "http://deb.debian.org/debian"
+apt_security_repository_url: "http://security.debian.org/debian-security"
+apt_debian_components:
+  - main
+  - contrib
+  - non-free
+  - non-free-firmware
