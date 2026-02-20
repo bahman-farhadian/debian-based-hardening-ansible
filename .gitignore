@@ -1,3 +1,4 @@
 .venv/
 artifacts/
 playbooks/artifacts/
+group_vars/local_secrets.yml

@@ -9,6 +9,12 @@
     - lynis
     - stage1
   pre_tasks:
+    - name: Load optional local secrets overrides
+      ansible.builtin.include_vars:
+        dir: "{{ playbook_dir }}/../group_vars"
+        files_matching: '^local_secrets\.yml$'
+        ignore_unknown_extensions: true
+
     - name: Ensure host OS is supported
       ansible.builtin.assert:
         that:

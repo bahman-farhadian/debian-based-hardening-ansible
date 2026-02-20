@@ -23,6 +23,32 @@
     group: adm
     mode: "0640"
 
+- name: Deploy SSH command logging profile hook
+  ansible.builtin.template:
+    src: ssh-command-logging.sh.j2
+    dest: /etc/profile.d/99-ssh-command-logging.sh
+    owner: root
+    group: root
+    mode: "0644"
+  when: ssh_command_logging_enabled | bool
+
+- name: Remove SSH command logging profile hook when disabled
+  ansible.builtin.file:
+    path: /etc/profile.d/99-ssh-command-logging.sh
+    state: absent
+  when: not (ssh_command_logging_enabled | bool)
+
+- name: Ensure SSH command log file exists
+  ansible.builtin.file:
+    path: "{{ ssh_command_log_file }}"
+    state: touch
+    access_time: preserve
+    modification_time: preserve
+    owner: root
+    group: adm
+    mode: "0640"
+  when: ssh_command_logging_enabled | bool
+
 - name: Configure logrotate retention for SSH session log
   ansible.builtin.template:
     src: ssh-session-logrotate.j2

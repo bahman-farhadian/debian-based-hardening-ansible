@@ -28,6 +28,27 @@ This repository is organized for maintainability and later Galaxy publishing.
 - `artifacts/lynis/<host>/` collected Lynis outputs
 - `Makefile` common run commands
 
+## Full feature review
+
+Current stage 2 hardening includes:
+
+- `common_repos` manages Debian repository components (`main contrib non-free non-free-firmware`) with mirror URL variables.
+- `prep_baseline` replaces bootstrap scripting: installs baseline admin packages, sets shell defaults, configures aliases/prompts, and can bootstrap root authorized keys.
+- `network_identity` manages hostname, `/etc/hosts`, and optional `/etc/resolv.conf`.
+- `package_hardening` enables unattended upgrades, update/upgrade flows, `debsums`, and residual package cleanup.
+- `firewall` manages iptables/ip6tables policy, backend selection (`nft`/`legacy` handling), runtime restore, and persistent rules.
+- `kernel_hardening` applies sysctl/kernel hardening controls with optional module loading lock.
+- `auth_hardening` applies password/account policy baseline.
+- `banner_hardening` applies local and SSH legal banners.
+- `ssh_hardening` applies SSH daemon hardening, key-only root policy option, login output cleanup, and operational limits.
+- `fail2ban` configures SSH brute-force protection.
+- `auditd` installs/enables audit daemon and deploys baseline audit rules.
+- `accounting_hardening` enables process accounting and sysstat collection.
+- `integrity_hardening` installs and configures AIDE plus malware scanner baseline.
+- `compiler_hardening` restricts compiler execution to root.
+- `file_permissions_hardening` tightens permissions on sensitive files/paths.
+- `session_logging` configures SSH session logs, per-command SSH logs, log rotation, and optional remote rsyslog forwarding.
+
 ## Control node setup
 
 Install dependencies:
@@ -53,6 +74,17 @@ Edit `inventories/hosts.yml`.
 Set host alias under `hardening_targets`.
 Set `ansible_host` to target hostname.
 Set `ansible_user` to the SSH user.
+
+## Local secrets file (git-ignored)
+
+For sensitive values (for example GRUB password plaintext), use a local override file:
+
+```bash
+cp group_vars/local_secrets.yml.example group_vars/local_secrets.yml
+```
+
+`group_vars/local_secrets.yml` is ignored by git and is auto-loaded by all playbooks.
+Keep real secret values only in that local file, not in `group_vars/all.yml`.
 
 ## Quick runbook
 
@@ -164,12 +196,41 @@ Verify SSH MOTD cleanup:
 ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "grep -n pam_motd /etc/pam.d/sshd || true; wc -c /etc/motd"
 ```
 
+## Per-command SSH logging
+
+The project logs every interactive SSH command entered in Bash sessions.
+
+- Hook file: `/etc/profile.d/99-ssh-command-logging.sh`
+- Command log file: `/var/log/ssh_commands.log`
+- Session/auth log file: `/var/log/ssh_sessions.log`
+- Default retention: 30 days via `/etc/logrotate.d/ssh-session-log`
+- Remote forwarding: when `remote_syslog_enabled=true`, both logs are still eligible for forwarding through rsyslog
+- Scope: interactive Bash SSH sessions (`SSH_CONNECTION` present)
+- Note: sensitive values typed in commands can appear in logs; prefer secret files or vault-backed workflows
+
+Validation flow:
+
+1. Apply hardening (`make harden` or `ansible-playbook playbooks/10_os_hardening.yml`).
+2. Start a new SSH login session and run a few commands.
+3. Check latest command audit lines:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "tail -n 30 /var/log/ssh_commands.log"
+```
+
+4. Confirm rsyslog rules and logrotate settings:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "sed -n '1,200p' /etc/rsyslog.d/30-ssh-session-logging.conf; sed -n '1,200p' /etc/logrotate.d/ssh-session-log"
+```
+
 ## Security logs to review regularly
 
 Recommended log files on each target:
 
 - `/var/log/auth.log` SSH authentication, sudo usage, and login failures.
 - `/var/log/ssh_sessions.log` dedicated SSH session activity log (from this project).
+- `/var/log/ssh_commands.log` per-command SSH audit trail for interactive Bash sessions.
 - `/var/log/fail2ban.log` ban/unban activity and brute-force mitigation.
 - `/var/log/audit/audit.log` kernel audit trail (auditd events and watched files).
 - `/var/log/syslog` service-level system events.
@@ -178,7 +239,7 @@ Recommended log files on each target:
 Useful review commands:
 
 ```bash
-ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "tail -n 100 /var/log/auth.log /var/log/ssh_sessions.log /var/log/fail2ban.log /var/log/audit/audit.log /var/log/syslog 2>/dev/null"
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "tail -n 100 /var/log/auth.log /var/log/ssh_sessions.log /var/log/ssh_commands.log /var/log/fail2ban.log /var/log/audit/audit.log /var/log/syslog 2>/dev/null"
 ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "grep -Ei 'failed|invalid|error|denied|ban' /var/log/auth.log /var/log/fail2ban.log /var/log/audit/audit.log 2>/dev/null | tail -n 100"
 ```
 
@@ -320,6 +381,13 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `file_permissions_hardening_enabled`
 - `integrity_initialize_aide`
 - `remote_syslog_enabled` and `remote_syslog_host`
+- `ssh_session_log_file` and `ssh_session_logrotate_days`
+- `ssh_command_logging_enabled`
+- `ssh_command_log_file` and `ssh_command_logrotate_days`
+- `ssh_command_log_facility`, `ssh_command_log_priority`, `ssh_command_logger_tag`
+- `grub_superuser`
+- `grub_password_plaintext` (set in `group_vars/local_secrets.yml`)
+- `grub_password_pbkdf2_hash` (set in `group_vars/local_secrets.yml`)
 
 ## Galaxy readiness direction
 
