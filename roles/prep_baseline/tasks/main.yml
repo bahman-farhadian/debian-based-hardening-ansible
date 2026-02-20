@@ -51,15 +51,177 @@
     - prep_enabled | bool
     - prep_manage_primary_user | bool
 
-- name: Set primary user facts
+- name: Fail when primary user UID was not found
+  ansible.builtin.fail:
+    msg: "No local user found for UID {{ prep_primary_user_uid }}. Set prep_manage_primary_user=false or adjust prep_primary_user_uid."
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_entry.rc != 0 or prep_primary_user_entry.stdout | length == 0
+
+- name: Set detected primary user facts
   ansible.builtin.set_fact:
-    prep_primary_user_name: "{{ prep_primary_user_entry.stdout.split(':')[0] }}"
-    prep_primary_user_home: "{{ prep_primary_user_entry.stdout.split(':')[5] }}"
+    prep_primary_user_detected_name: "{{ prep_primary_user_entry.stdout.split(':')[0] }}"
+    prep_primary_user_detected_home: "{{ prep_primary_user_entry.stdout.split(':')[5] }}"
   when:
     - prep_enabled | bool
     - prep_manage_primary_user | bool
     - prep_primary_user_entry.rc == 0
     - prep_primary_user_entry.stdout | length > 0
+
+- name: Set desired primary user facts
+  ansible.builtin.set_fact:
+    prep_primary_user_name: >-
+      {{
+        prep_primary_user_desired_name
+        if prep_primary_user_desired_name | length > 0
+        else prep_primary_user_detected_name
+      }}
+    prep_primary_user_home: "{{ prep_primary_user_home_base ~ '/' ~ (prep_primary_user_desired_name if prep_primary_user_desired_name | length > 0 else prep_primary_user_detected_name) }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_detected_name is defined
+
+- name: Check whether desired primary user already exists
+  ansible.builtin.command: "getent passwd {{ prep_primary_user_name }}"
+  register: prep_primary_user_desired_entry
+  changed_when: false
+  failed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Validate desired primary user target is safe
+  ansible.builtin.assert:
+    that:
+      - >-
+        prep_primary_user_name == prep_primary_user_detected_name
+        or prep_primary_user_desired_entry.rc != 0
+        or prep_primary_user_desired_entry.stdout.split(':')[2] == (prep_primary_user_uid | string)
+    fail_msg: >-
+      Requested primary username {{ prep_primary_user_name }} already exists with a different UID.
+      Pick another prep_primary_user_desired_name.
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+
+- name: Check whether detected primary group exists
+  ansible.builtin.command: "getent group {{ prep_primary_user_detected_name }}"
+  register: prep_primary_group_detected
+  changed_when: false
+  failed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+
+- name: Check whether desired primary group exists
+  ansible.builtin.command: "getent group {{ prep_primary_user_name }}"
+  register: prep_primary_group_desired
+  changed_when: false
+  failed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+
+- name: Rename primary user account when requested
+  ansible.builtin.command: "usermod -l {{ prep_primary_user_name }} {{ prep_primary_user_detected_name }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+    - prep_primary_user_desired_entry.rc != 0
+
+- name: Rename primary user group when safe and needed
+  ansible.builtin.command: "groupmod -n {{ prep_primary_user_name }} {{ prep_primary_user_detected_name }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+    - prep_primary_group_detected.rc == 0
+    - prep_primary_group_desired.rc != 0
+
+- name: Ensure primary user home path matches desired user name
+  ansible.builtin.command: "usermod -d {{ prep_primary_user_home }} -m {{ prep_primary_user_name }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_home is defined
+    - prep_primary_user_detected_home != prep_primary_user_home
+
+- name: Refresh primary user entry by UID
+  ansible.builtin.command: "getent passwd {{ prep_primary_user_uid }}"
+  register: prep_primary_user_entry_refreshed
+  changed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+
+- name: Refresh primary user facts
+  ansible.builtin.set_fact:
+    prep_primary_user_name: "{{ prep_primary_user_entry_refreshed.stdout.split(':')[0] }}"
+    prep_primary_user_home: "{{ prep_primary_user_entry_refreshed.stdout.split(':')[5] }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_entry_refreshed.rc == 0
+    - prep_primary_user_entry_refreshed.stdout | length > 0
+
+- name: Ensure primary user home directory exists with correct ownership
+  ansible.builtin.file:
+    path: "{{ prep_primary_user_home }}"
+    state: directory
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0750"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+    - prep_primary_user_home is defined
+
+- name: Ensure primary user SSH directory exists
+  ansible.builtin.file:
+    path: "{{ prep_primary_user_home }}/.ssh"
+    state: directory
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0700"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+    - prep_primary_user_home is defined
+
+- name: Authorize provided primary user SSH public keys
+  ansible.builtin.lineinfile:
+    path: "{{ prep_primary_user_home }}/.ssh/authorized_keys"
+    create: true
+    owner: "{{ prep_primary_user_name }}"
+    group: "{{ prep_primary_user_name }}"
+    mode: "0600"
+    line: "{{ item }}"
+    state: present
+  loop: "{{ prep_primary_user_authorized_keys | reject('equalto', '') | list }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_name is defined
+    - prep_primary_user_home is defined
+    - (prep_primary_user_authorized_keys | length) > 0
 
 - name: Ensure primary user is in sudo group
   ansible.builtin.user:
@@ -83,6 +245,17 @@
     - prep_enabled | bool
     - prep_manage_primary_user | bool
     - prep_primary_user_name is defined
+
+- name: Remove legacy sudoers file after primary user rename
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-{{ prep_primary_user_detected_name }}"
+    state: absent
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
 
 - name: Create primary user .bash_profile when missing
   ansible.builtin.template:

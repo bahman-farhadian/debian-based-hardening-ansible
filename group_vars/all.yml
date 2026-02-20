@@ -24,6 +24,11 @@ prep_enabled: true
 prep_root_authorized_keys: []
 prep_manage_primary_user: true
 prep_primary_user_uid: "1000"
+# Optional rename for template default user (e.g. qwerty -> adminops).
+# Leave empty to keep detected UID user name unchanged.
+prep_primary_user_desired_name: ""
+# SSH public keys for the primary non-root user.
+prep_primary_user_authorized_keys: []
 
 # Network identity hardening
 network_identity_manage_hosts: true

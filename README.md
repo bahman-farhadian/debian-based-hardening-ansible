@@ -128,6 +128,28 @@ cp group_vars/local_secrets.yml.example group_vars/local_secrets.yml
 `group_vars/local_secrets.yml` is ignored by git and is auto-loaded by all playbooks.
 Keep real secret values only in that local file, not in `group_vars/all.yml`.
 
+## Primary user rename and SSH keys
+
+Template VMs often start with a default user such as `qwerty` (UID `1000`).
+The prep role can rename that user, move its home directory, and install SSH keys for both root and the primary user.
+
+Set these in `group_vars/all.yml`:
+
+```yaml
+prep_primary_user_uid: "1000"
+prep_primary_user_desired_name: "adminops"
+prep_primary_user_authorized_keys:
+  - "ssh-ed25519 AAAA... adminops-key"
+prep_root_authorized_keys:
+  - "ssh-ed25519 AAAA... root-key"
+```
+
+Behavior:
+
+- If `prep_primary_user_desired_name` is set and differs from the detected UID user, the account is renamed.
+- Home is moved to `/home/<new-user>` and ownership is corrected.
+- `~/.ssh/authorized_keys` is managed for root and primary user when key lists are provided.
+
 ## Quick runbook
 
 Recommended first-run sequence (fresh VM):
@@ -146,6 +168,30 @@ make runtime-check
 
 If you change `ssh_port` in `group_vars/all.yml`, run hardening in 2 passes:
 pass 1 with current inventory `ansible_port`, then update `ansible_port` in inventory, then pass 2.
+
+Recommended SSH port migration sequence (to reach stable baseline score):
+
+1. Keep inventory `ansible_port: 22` and run:
+
+```bash
+make harden LIMIT=target-node-01
+```
+
+2. Set `ssh_port: 2222` in `group_vars/all.yml`, run again (still using inventory port 22):
+
+```bash
+make harden LIMIT=target-node-01
+```
+
+3. Change inventory `ansible_port` for the host to `2222`, then:
+
+```bash
+make reboot LIMIT=target-node-01
+make scan LIMIT=target-node-01
+make score
+```
+
+This sequence avoids lockout and is the expected path to keep the hardened baseline around score `88` in this project.
 
 Connectivity test:
 
@@ -172,6 +218,12 @@ Stage 2 hardening with root SSH key bootstrap:
 
 ```bash
 ansible-playbook playbooks/10_os_hardening.yml -e 'prep_root_authorized_keys=["ssh-ed25519 AAAA... your-key-comment"]'
+```
+
+Stage 2 hardening with primary-user rename and both SSH key sets:
+
+```bash
+ansible-playbook playbooks/10_os_hardening.yml -e 'prep_primary_user_desired_name=adminops prep_primary_user_authorized_keys=["ssh-ed25519 AAAA... adminops-key"] prep_root_authorized_keys=["ssh-ed25519 AAAA... root-key"]'
 ```
 
 Re-scan after hardening:
@@ -502,6 +554,8 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `prep_root_authorized_keys`
 - `prep_manage_primary_user`
 - `prep_primary_user_uid`
+- `prep_primary_user_desired_name`
+- `prep_primary_user_authorized_keys`
 - `network_identity_manage_hosts`
 - `network_identity_manage_resolv_conf`
 - `network_identity_primary_ipv4`
