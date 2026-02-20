@@ -6,6 +6,8 @@ run_os_hardening: false
 # APT repository settings
 apt_repository_url: "http://deb.debian.org/debian"
 apt_security_repository_url: "http://security.debian.org/debian-security"
+# Optional suite override (leave empty for fact-based mapping: Debian 12->bookworm, 13->trixie)
+apt_debian_release_override: ""
 # Debian only; Ubuntu keeps distro defaults unless you add an Ubuntu role later.
 apt_debian_components:
   - main
@@ -30,6 +32,13 @@ prep_primary_user_desired_name: ""
 # SSH public keys for the primary non-root user.
 prep_primary_user_authorized_keys: []
 
+# Boot/runlevel hardening
+boot_hardening_enabled: true
+boot_set_default_target: true
+boot_default_target: "multi-user.target"
+boot_fix_runlevel_debian13: true
+boot_runlevel_compat_wrapper_enabled: true
+
 # Network identity hardening
 network_identity_manage_hosts: true
 # Keep DNS identity controls enabled by default to avoid Lynis NETW-2705/NAME-4028 regressions.
@@ -52,6 +61,17 @@ package_hardening_enable_unattended_upgrades: true
 package_hardening_run_dist_upgrade: true
 package_hardening_debsums_cron_check: "weekly"
 package_hardening_purge_removed_packages: true
+
+# Service hardening (systemd drop-ins)
+service_hardening_enabled: true
+service_hardening_units:
+  - ssh.service
+  - fail2ban.service
+  - rsyslog.service
+  - cron.service
+  - unattended-upgrades.service
+# Optional: disable services you do not use (example: exim4.service)
+service_hardening_disable_units: []
 
 # Authentication hardening
 auth_apply_to_existing_local_users: true

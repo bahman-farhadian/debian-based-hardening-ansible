@@ -1,6 +1,12 @@
 ---
 apt_repository_url: "http://deb.debian.org/debian"
 apt_security_repository_url: "http://security.debian.org/debian-security"
+# Optionally force a Debian suite name, e.g. "bookworm" or "trixie".
+apt_debian_release_override: ""
+# Fact-based mapping for supported Debian releases.
+apt_debian_release_map:
+  "12": "bookworm"
+  "13": "trixie"
 apt_debian_components:
   - main
   - contrib

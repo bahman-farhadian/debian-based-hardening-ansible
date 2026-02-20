@@ -4,6 +4,11 @@
     name: common_repos
   when: os_hardening_enabled | bool
 
+- name: Apply boot and runlevel hardening baseline
+  ansible.builtin.include_role:
+    name: boot_hardening
+  when: os_hardening_enabled | bool
+
 - name: Apply preparation baseline
   ansible.builtin.include_role:
     name: prep_baseline
@@ -17,6 +22,11 @@
 - name: Apply package hardening baseline
   ansible.builtin.include_role:
     name: package_hardening
+  when: os_hardening_enabled | bool
+
+- name: Apply service hardening baseline
+  ansible.builtin.include_role:
+    name: service_hardening
   when: os_hardening_enabled | bool
 
 - name: Apply firewall baseline

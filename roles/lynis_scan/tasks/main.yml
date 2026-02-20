@@ -34,6 +34,8 @@
   ansible.builtin.command: "./lynis audit system {{ '--quick' if lynis_quick_mode else '' }}"
   args:
     chdir: "{{ lynis_install_path }}"
+  environment:
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   register: lynis_run
   changed_when: false
 

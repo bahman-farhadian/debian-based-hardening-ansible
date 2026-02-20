@@ -21,6 +21,7 @@ This repository is organized for maintainability and later Galaxy publishing.
 - `group_vars/all.yml` central project variables
 - `inventories/hosts.yml` inventory
 - `roles/os_hardening` stage 2 orchestrator role
+- `roles/boot_hardening` boot target and runlevel compatibility controls
 - `roles/prep_baseline` idempotent replacement for bootstrap shell prep
 - `roles/network_identity` DNS, resolv.conf and hosts identity controls
 - `roles/file_permissions_hardening` restrictive permissions for SSH and cron paths
@@ -32,10 +33,12 @@ This repository is organized for maintainability and later Galaxy publishing.
 
 Current stage 2 hardening includes:
 
-- `common_repos` manages Debian repository components (`main contrib non-free non-free-firmware`) with mirror URL variables.
+- `common_repos` manages Debian repository components (`main contrib non-free non-free-firmware`) with mirror URL variables and fact-based suite mapping (`12->bookworm`, `13->trixie`).
+- `boot_hardening` applies server boot defaults and Debian 13 runlevel compatibility updates for systemd/utmp.
 - `prep_baseline` replaces bootstrap scripting: installs baseline admin packages, sets shell defaults, configures aliases/prompts, and can bootstrap root authorized keys.
 - `network_identity` manages hostname, `/etc/hosts`, and optional `/etc/resolv.conf`.
 - `package_hardening` enables unattended upgrades, update/upgrade flows, `debsums`, and residual package cleanup.
+- `service_hardening` applies systemd drop-in restrictions to selected services to improve service-level hardening posture (`BOOT-5264` related).
 - `firewall` manages iptables/ip6tables policy, backend selection (`nft`/`legacy` handling), runtime restore, persistent rules, optional service-port allow list, and optional IPv4 forwarding/NAT mode.
 - `kernel_hardening` applies sysctl/kernel hardening controls with optional module loading lock.
 - `auth_hardening` applies password/account policy baseline.
@@ -95,6 +98,38 @@ all:
 For multiple VMs, add more host blocks under `hardening_targets.hosts`.
 Ansible runs them simultaneously (up to fork count).
 
+## Debian suite selection (12/13)
+
+Repository suite selection is automatic from gathered facts:
+
+- Debian 12 uses `bookworm`
+- Debian 13 uses `trixie`
+
+If you need to force a suite, set:
+
+```yaml
+apt_debian_release_override: "trixie"
+```
+
+Quick verification on target:
+
+```bash
+grep -E '^(URIs|Suites|Components):' /etc/apt/sources.list.d/debian.sources
+```
+
+Debian 13 runlevel compatibility:
+
+- `boot_hardening` enforces server default target (`multi-user.target`).
+- If Debian 13 lacks utmp/systemd runlevel units, it deploys a compatibility `runlevel` shim at `/usr/local/sbin/runlevel`.
+- Verify with:
+
+```bash
+runlevel
+who -r
+systemctl get-default
+command -v runlevel
+```
+
 All baseline hardening variables are centralized in `group_vars/all.yml`.
 The defaults in `group_vars/all.yml` are tuned to avoid the common drop from 88 to 87
 related to DNS identity (`NETW-2705` / `NAME-4028`) and residual packages (`PKGS-7346`).
@@ -152,38 +187,21 @@ Behavior:
 
 ## Quick runbook
 
-Recommended first-run sequence (fresh VM):
+This project supports the same hardening flow on Debian 12 and Debian 13.
+For hardening, users only need to run `playbooks/10_os_hardening.yml` (via `make harden`).
+
+Recommended sequence:
 
 ```bash
-make help
 make ping
-make scan
-make harden LIMIT=target-node-01
-make reboot LIMIT=target-node-01
-make scan LIMIT=target-node-01
-make score
-make gap-report
-make runtime-check
-```
-
-If you change `ssh_port` in `group_vars/all.yml`, run hardening in 2 passes:
-pass 1 with current inventory `ansible_port`, then update `ansible_port` in inventory, then pass 2.
-
-Recommended SSH port migration sequence (to reach stable baseline score):
-
-1. Keep inventory `ansible_port: 22` and run:
-
-```bash
 make harden LIMIT=target-node-01
 ```
 
-2. Set `ssh_port: 2222` in `group_vars/all.yml`, run again (still using inventory port 22):
+Then change SSH port settings:
+- Set `ssh_port` in `group_vars/all.yml` (example: `2222`).
+- Set the same value for host `ansible_port` in `inventories/hosts.yml`.
 
-```bash
-make harden LIMIT=target-node-01
-```
-
-3. Change inventory `ansible_port` for the host to `2222`, then:
+Continue:
 
 ```bash
 make reboot LIMIT=target-node-01
@@ -191,7 +209,9 @@ make scan LIMIT=target-node-01
 make score
 ```
 
-This sequence avoids lockout and is the expected path to keep the hardened baseline around score `88` in this project.
+This sequence is the standard execution order:
+`make ping` -> `make harden` -> change SSH port -> `make reboot` -> `make scan` -> `make score`.
+
 By default, firewall rules also keep the current inventory SSH port allowed during migration (`firewall_allow_current_ansible_port: true`).
 
 If hardening fails with a dpkg/apt lock error caused by `unattended-upgrades`, run `make harden` again.
@@ -201,6 +221,22 @@ Connectivity test:
 
 ```bash
 ansible -i inventories/hosts.yml hardening_targets -m ping
+```
+
+Service hardening verification:
+
+```bash
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "systemd-analyze security ssh.service fail2ban.service rsyslog.service cron.service | sed -n '1,200p'"
+ansible -i inventories/hosts.yml hardening_targets -b -m shell -a "for u in ssh.service fail2ban.service rsyslog.service cron.service unattended-upgrades.service; do echo \"== $u ==\"; systemctl cat \"$u\" | grep -E 'NoNewPrivileges=|PrivateTmp=|ProtectKernel|ProtectControlGroups=|RestrictSUIDSGID=|LockPersonality=|RestrictRealtime=|RestrictNamespaces=' || true; done"
+```
+
+Optional service reduction for `BOOT-5264`:
+- Some baseline services (for example mail transport units like `exim4.service`) may not be needed in your VM role.
+- Add them to `service_hardening_disable_units` to stop and disable them.
+
+```yaml
+service_hardening_disable_units:
+  - exim4.service
 ```
 
 Stage 1 baseline scan:
@@ -554,7 +590,14 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 
 - `run_lynis_scan`
 - `run_os_hardening`
+- `apt_repository_url`, `apt_security_repository_url`
+- `apt_debian_release_override`
 - `prep_enabled`
+- `boot_hardening_enabled`
+- `boot_set_default_target`
+- `boot_default_target`
+- `boot_fix_runlevel_debian13`
+- `boot_runlevel_compat_wrapper_enabled`
 - `prep_root_authorized_keys`
 - `prep_manage_primary_user`
 - `prep_primary_user_uid`
@@ -583,6 +626,9 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `firewall_nat_ipv4_enabled`
 - `package_hardening_run_dist_upgrade`
 - `package_hardening_purge_removed_packages`
+- `service_hardening_enabled`
+- `service_hardening_units`
+- `service_hardening_disable_units`
 - `apt_lock_timeout`, `apt_package_retries`, `apt_package_retry_delay`
 - `auth_apply_to_existing_local_users`
 - `auth_apply_to_root`
