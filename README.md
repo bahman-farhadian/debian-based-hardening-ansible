@@ -173,6 +173,8 @@ Set these in `group_vars/all.yml`:
 ```yaml
 prep_primary_user_uid: "1000"
 prep_primary_user_desired_name: "adminops"
+prep_replace_primary_user: false
+prep_enforce_single_login_user: false
 prep_primary_user_authorized_keys:
   - "ssh-ed25519 AAAA... adminops-key"
 prep_root_authorized_keys:
@@ -184,6 +186,10 @@ Behavior:
 - If `prep_primary_user_desired_name` is set and differs from the detected UID user, the account is renamed.
 - Home is moved to `/home/<new-user>` and ownership is corrected.
 - `~/.ssh/authorized_keys` is managed for root and primary user when key lists are provided.
+- If `prep_replace_primary_user: true`, the detected UID user (for example `debian` or `qwerty`) is removed and recreated as `prep_primary_user_desired_name`.
+- If `prep_enforce_single_login_user: true`, all other human login users are removed, keeping only root and `prep_primary_user_desired_name`.
+- Optional safety override: keep specific users by listing them in `prep_user_cleanup_exempt_users`.
+- Safety check: replacement mode fails if you are connected as that same detected user (to avoid self-lockout).
 
 ## Quick runbook
 
@@ -592,6 +598,8 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `run_os_hardening`
 - `apt_repository_url`, `apt_security_repository_url`
 - `apt_debian_release_override`
+- `apt_debian_managed_sources_file`
+- `apt_debian_disable_conflicting_sources`
 - `prep_enabled`
 - `boot_hardening_enabled`
 - `boot_set_default_target`
@@ -602,6 +610,9 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `prep_manage_primary_user`
 - `prep_primary_user_uid`
 - `prep_primary_user_desired_name`
+- `prep_replace_primary_user`
+- `prep_enforce_single_login_user`
+- `prep_user_cleanup_exempt_users`
 - `prep_primary_user_authorized_keys`
 - `network_identity_manage_hosts`
 - `network_identity_manage_resolv_conf`

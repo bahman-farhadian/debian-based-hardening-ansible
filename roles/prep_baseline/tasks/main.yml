@@ -89,6 +89,31 @@
     - prep_manage_primary_user | bool
     - prep_primary_user_detected_name is defined
 
+- name: Validate primary user replacement inputs
+  ansible.builtin.assert:
+    that:
+      - prep_primary_user_desired_name | length > 0
+    fail_msg: >-
+      prep_replace_primary_user=true requires prep_primary_user_desired_name to be set in group_vars/all.yml.
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_replace_primary_user | bool
+    - prep_primary_user_detected_name is defined
+
+- name: Note when replacement mode is already converged
+  ansible.builtin.debug:
+    msg: >-
+      prep_replace_primary_user is enabled and UID {{ prep_primary_user_uid }} already maps to {{ prep_primary_user_desired_name }}.
+      Replacement step is skipped as no-op.
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_replace_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_desired_name | length > 0
+    - prep_primary_user_detected_name == prep_primary_user_desired_name
+
 - name: Check whether desired primary user already exists
   ansible.builtin.command: "getent passwd {{ prep_primary_user_name }}"
   register: prep_primary_user_desired_entry
@@ -114,6 +139,63 @@
     - prep_manage_primary_user | bool
     - prep_primary_user_name is defined
 
+- name: Validate user replacement safety for current SSH session
+  ansible.builtin.assert:
+    that:
+      - (ansible_user | default('')) != prep_primary_user_detected_name
+    fail_msg: >-
+      Refusing to replace the currently connected SSH user {{ prep_primary_user_detected_name }}.
+      Connect as root or another admin account, then re-run.
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_replace_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+
+- name: Stop running processes for detected primary user before replacement
+  ansible.builtin.command: "pkill -u {{ prep_primary_user_detected_name }}"
+  failed_when: false
+  changed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_replace_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+
+- name: Remove detected primary user before recreation
+  ansible.builtin.user:
+    name: "{{ prep_primary_user_detected_name }}"
+    state: absent
+    remove: true
+    force: true
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_replace_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+
+- name: Ensure replacement primary user exists with expected UID
+  ansible.builtin.user:
+    name: "{{ prep_primary_user_name }}"
+    uid: "{{ prep_primary_user_uid | int }}"
+    shell: /bin/bash
+    home: "{{ prep_primary_user_home }}"
+    create_home: true
+    state: present
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_replace_primary_user | bool
+    - prep_primary_user_detected_name is defined
+    - prep_primary_user_name is defined
+    - prep_primary_user_detected_name != prep_primary_user_name
+
 - name: Check whether detected primary group exists
   ansible.builtin.command: "getent group {{ prep_primary_user_detected_name }}"
   register: prep_primary_group_detected
@@ -122,6 +204,7 @@
   when:
     - prep_enabled | bool
     - prep_manage_primary_user | bool
+    - not (prep_replace_primary_user | bool)
     - prep_primary_user_detected_name is defined
     - prep_primary_user_name is defined
     - prep_primary_user_detected_name != prep_primary_user_name
@@ -134,6 +217,7 @@
   when:
     - prep_enabled | bool
     - prep_manage_primary_user | bool
+    - not (prep_replace_primary_user | bool)
     - prep_primary_user_detected_name is defined
     - prep_primary_user_name is defined
     - prep_primary_user_detected_name != prep_primary_user_name
@@ -143,6 +227,7 @@
   when:
     - prep_enabled | bool
     - prep_manage_primary_user | bool
+    - not (prep_replace_primary_user | bool)
     - prep_primary_user_detected_name is defined
     - prep_primary_user_name is defined
     - prep_primary_user_detected_name != prep_primary_user_name
@@ -153,6 +238,7 @@
   when:
     - prep_enabled | bool
     - prep_manage_primary_user | bool
+    - not (prep_replace_primary_user | bool)
     - prep_primary_user_detected_name is defined
     - prep_primary_user_name is defined
     - prep_primary_user_detected_name != prep_primary_user_name
@@ -164,6 +250,7 @@
   when:
     - prep_enabled | bool
     - prep_manage_primary_user | bool
+    - not (prep_replace_primary_user | bool)
     - prep_primary_user_name is defined
     - prep_primary_user_detected_home is defined
     - prep_primary_user_detected_home != prep_primary_user_home
@@ -262,6 +349,99 @@
     - prep_primary_user_detected_name is defined
     - prep_primary_user_name is defined
     - prep_primary_user_detected_name != prep_primary_user_name
+
+- name: Validate single-user enforcement inputs
+  ansible.builtin.assert:
+    that:
+      - prep_primary_user_desired_name | length > 0
+    fail_msg: >-
+      prep_enforce_single_login_user=true requires prep_primary_user_desired_name to be explicitly set in group_vars/all.yml.
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
+
+- name: Collect human login users to remove
+  ansible.builtin.shell: |
+    awk -F: -v min_uid="{{ prep_user_cleanup_min_uid }}" -v max_uid="{{ prep_user_cleanup_max_uid }}" '
+      ($3 >= min_uid && $3 < max_uid && $1 != "root" && $1 != "{{ prep_primary_user_name }}" && $7 !~ /(nologin|false)$/) {print $1}
+    ' /etc/passwd
+  args:
+    executable: /bin/bash
+  register: prep_login_users_remove_raw
+  changed_when: false
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
+
+- name: Build login user removal list
+  ansible.builtin.set_fact:
+    prep_login_users_to_remove: >-
+      {{
+        (prep_login_users_remove_raw.stdout_lines | default([]))
+        | map('trim')
+        | reject('equalto', '')
+        | reject('equalto', 'root')
+        | reject('equalto', prep_primary_user_name)
+        | list
+        | difference(prep_user_cleanup_exempt_users | default([]))
+      }}
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
+
+- name: Refuse to remove currently connected SSH user
+  ansible.builtin.assert:
+    that:
+      - (ansible_user | default('')) not in (prep_login_users_to_remove | default([]))
+    fail_msg: >-
+      Refusing to remove currently connected SSH user {{ ansible_user }}.
+      Connect as root or as {{ prep_primary_user_name }}, then re-run.
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
+
+- name: Stop running processes for users slated for removal
+  ansible.builtin.command: "pkill -u {{ item }}"
+  failed_when: false
+  changed_when: false
+  loop: "{{ prep_login_users_to_remove | default([]) }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
+
+- name: Remove sudoers entries for removed users
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-{{ item }}"
+    state: absent
+  loop: "{{ prep_login_users_to_remove | default([]) }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
+
+- name: Remove extra human login users
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: true
+    force: true
+  loop: "{{ prep_login_users_to_remove | default([]) }}"
+  when:
+    - prep_enabled | bool
+    - prep_manage_primary_user | bool
+    - prep_enforce_single_login_user | bool
+    - prep_primary_user_name is defined
 
 - name: Create primary user .bash_profile when missing
   ansible.builtin.template:

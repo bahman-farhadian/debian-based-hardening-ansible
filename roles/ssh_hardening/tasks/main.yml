@@ -21,10 +21,18 @@
 - name: Deploy hardened SSH include config
   ansible.builtin.template:
     src: sshd_hardening.conf.j2
-    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    dest: "{{ ssh_hardening_dropin_file }}"
     owner: root
     group: root
     mode: "0644"
+  notify: Restart ssh
+
+- name: Remove legacy SSH hardening drop-in paths
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ ssh_hardening_legacy_dropin_files | default([]) }}"
+  when: item != ssh_hardening_dropin_file
   notify: Restart ssh
 
 - name: Enforce SSH banner path in main config
@@ -92,3 +100,10 @@
     name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
     enabled: true
     state: started
+
+- name: Warn when inventory SSH port differs from hardened SSH port
+  ansible.builtin.debug:
+    msg: >-
+      SSH hardening is set to port {{ ssh_port }}, while Ansible currently connects with ansible_port={{ ansible_port | default(22) }}.
+      After this run, update inventories/hosts.yml ansible_port to {{ ssh_port }} and re-run hardening for idempotency.
+  when: (ansible_port | default(22) | int) != (ssh_port | int)

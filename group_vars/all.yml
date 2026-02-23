@@ -8,6 +8,10 @@ apt_repository_url: "http://deb.debian.org/debian"
 apt_security_repository_url: "http://security.debian.org/debian-security"
 # Optional suite override (leave empty for fact-based mapping: Debian 12->bookworm, 13->trixie)
 apt_debian_release_override: ""
+# Managed Debian sources file path
+apt_debian_managed_sources_file: "/etc/apt/sources.list.d/debian.sources"
+# Disable conflicting default cloud image Debian source entries
+apt_debian_disable_conflicting_sources: true
 # Debian only; Ubuntu keeps distro defaults unless you add an Ubuntu role later.
 apt_debian_components:
   - main
@@ -28,8 +32,15 @@ prep_manage_primary_user: true
 prep_primary_user_uid: "1000"
 # Optional rename for template default user (e.g. qwerty -> adminops).
 # Leave empty to keep detected UID user name unchanged.
-prep_primary_user_desired_name: ""
+prep_primary_user_desired_name: "adminops"
+# If true, remove the detected UID user and recreate it with prep_primary_user_desired_name.
+# Keep false on production unless you explicitly want to replace template users (debian/qwerty).
+prep_replace_primary_user: false
+# If true, keep only prep_primary_user_desired_name as the non-root login user.
+# This removes other human login users (for example debian/qwerty). Disable on production if not desired.
+prep_enforce_single_login_user: false
 # SSH public keys for the primary non-root user.
+# Keep real keys in group_vars/local_secrets.yml.
 prep_primary_user_authorized_keys: []
 
 # Boot/runlevel hardening
