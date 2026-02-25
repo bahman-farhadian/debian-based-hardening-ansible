@@ -1,7 +1,7 @@
 ---
-- name: Apply repository baseline (Debian)
+- name: Apply network identity hardening baseline
   ansible.builtin.include_role:
-    name: common_repos
+    name: network_identity
   when: os_hardening_enabled | bool
 
 - name: Apply boot and runlevel hardening baseline
@@ -14,9 +14,9 @@
     name: prep_baseline
   when: os_hardening_enabled | bool
 
-- name: Apply network identity hardening baseline
+- name: Apply repository baseline (Debian)
   ansible.builtin.include_role:
-    name: network_identity
+    name: common_repos
   when: os_hardening_enabled | bool
 
 - name: Apply package hardening baseline
