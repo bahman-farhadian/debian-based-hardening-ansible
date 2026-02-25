@@ -130,6 +130,18 @@ systemctl get-default
 command -v runlevel
 ```
 
+## Local repo host mapping (/etc/hosts)
+
+If your apt mirror or internal repository FQDN is not resolvable by DNS, you can inject static host entries:
+
+```yaml
+network_identity_local_repo_hosts_enabled: true
+network_identity_local_repo_hosts_entries:
+  - "192.168.24.2 repo.idops.local"
+```
+
+When disabled (default), these entries are not added.
+
 All baseline hardening variables are centralized in `group_vars/all.yml`.
 The defaults in `group_vars/all.yml` are tuned to avoid the common drop from 88 to 87
 related to DNS identity (`NETW-2705` / `NAME-4028`) and residual packages (`PKGS-7346`).
@@ -621,6 +633,8 @@ If issues appear after enabling it, set `kernel_lock_module_loading: false` and 
 - `network_identity_fqdn`
 - `network_identity_manage_loopback_fqdn`
 - `network_identity_manage_hosts_via_template`
+- `network_identity_local_repo_hosts_enabled`
+- `network_identity_local_repo_hosts_entries`
 - `ssh_allow_root_login`
 - `ssh_allow_password_auth`
 - `ssh_disable_pam_motd`

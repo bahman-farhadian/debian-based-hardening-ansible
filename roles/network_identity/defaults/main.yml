@@ -14,3 +14,5 @@ network_identity_manage_loopback_fqdn: true
 network_identity_manage_hosts_via_template: true
 network_identity_cleanup_stale_hostname_entries: true
 network_identity_extra_hosts_entries: []
+network_identity_local_repo_hosts_enabled: false
+network_identity_local_repo_hosts_entries: []

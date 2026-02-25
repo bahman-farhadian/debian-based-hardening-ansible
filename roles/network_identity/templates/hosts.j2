@@ -11,6 +11,6 @@
 ::1 localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
-{% for entry in network_identity_extra_hosts_entries %}
+{% for entry in network_identity_effective_extra_hosts_entries | default(network_identity_extra_hosts_entries) %}
 {{ entry }}
 {% endfor %}

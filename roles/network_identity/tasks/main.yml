@@ -61,6 +61,20 @@
         )
       }}
 
+- name: Build effective extra hosts entries
+  ansible.builtin.set_fact:
+    network_identity_effective_extra_hosts_entries: >-
+      {{
+        (
+          network_identity_extra_hosts_entries
+          + (
+            network_identity_local_repo_hosts_entries
+            if (network_identity_local_repo_hosts_enabled | bool)
+            else []
+          )
+        ) | unique
+      }}
+
 - name: Set system hostname when explicitly requested
   ansible.builtin.hostname:
     name: "{{ network_identity_hostname }}"
@@ -128,7 +142,7 @@
     line: "{{ item }}"
     state: present
     insertafter: EOF
-  loop: "{{ network_identity_extra_hosts_entries }}"
+  loop: "{{ network_identity_effective_extra_hosts_entries }}"
   when:
     - network_identity_manage_hosts | bool
     - not (network_identity_manage_hosts_via_template | bool)
